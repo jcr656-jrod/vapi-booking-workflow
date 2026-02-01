@@ -1,0 +1,316 @@
+{
+  "name": "[CLIENT_NAME] - Voice AI Booking",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// VOICE-AI SAAS - CLIENT CONFIGURATION\n// ========================================\n// Update these values for each new client\n\nconst CLIENT_CONFIG = {\n  // ===== BUSINESS INFO =====\n  businessName: \"CHANGE_ME\",\n  businessPhone: \"555-123-4567\",\n  businessEmail: \"info@example.com\",\n  timezone: \"America/New_York\",\n  \n  // ===== BOOKING SETTINGS =====\n  slotDuration: 30,              // minutes per appointment\n  businessHoursStart: 9,         // 9 AM\n  businessHoursEnd: 17,          // 5 PM\n  workDays: [1, 2, 3, 4, 5],     // Mon-Fri (0=Sun, 6=Sat)\n  \n  // ===== GOOGLE CALENDAR =====\n  calendarEmail: \"calendar@example.com\",\n  \n  // ===== GOHIGHLEVEL (Optional) =====\n  ghlEnabled: true,\n  ghlApiKey: \"CHANGE_ME\",\n  ghlLocationId: \"CHANGE_ME\",\n  ghlPipelineId: \"CHANGE_ME\",\n  ghlStageId: \"CHANGE_ME\",\n  \n  // ===== SMS SETTINGS =====\n  smsEnabled: true,\n  \n  // ===== EMAIL SETTINGS =====\n  ownerEmail: \"owner@example.com\",\n  fromEmail: \"bookings@example.com\",\n  \n  // ===== BRANDING =====\n  emailSignature: \"- Your Business Team\",\n  smsSignature: \"- Your Business\"\n};\n\n// Export config for use in other nodes\nreturn { json: { config: CLIENT_CONFIG } };"
+      },
+      "id": "config",
+      "name": "Client Config",
+      "type": "n8n-nodes-base.code",
+      "position": [-500, 300],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "client-slots",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node_1",
+      "name": "Get Slots Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [0, 176],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "const webhookData = $input.first().json;\nconst body = webhookData.body || webhookData;\nconst toolCalls = body.message?.toolCalls || [];\nconst toolCallId = toolCalls[0]?.id || '';\nconst argsRaw = toolCalls[0]?.function?.arguments || '{}';\nconst args = typeof argsRaw === 'string' ? JSON.parse(argsRaw) : argsRaw;\n\nlet requestedDate = webhookData.query?.date || args.date || new Date().toISOString().split('T')[0];\n\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\nlet checkDate = new Date(requestedDate + 'T00:00:00');\n\nif (checkDate < today) {\n  const [year, month, day] = requestedDate.split('-').map(Number);\n  const currentYear = today.getFullYear();\n  let newDate = new Date(currentYear, month - 1, day);\n  if (newDate < today) newDate = new Date(currentYear + 1, month - 1, day);\n  requestedDate = newDate.toISOString().split('T')[0];\n}\n\nreturn {\n  json: {\n    toolCallId,\n    requestedDate,\n    timeMin: requestedDate + 'T00:00:00-05:00',\n    timeMax: requestedDate + 'T23:59:59-05:00'\n  }\n};"
+      },
+      "id": "node_2",
+      "name": "Parse Slots Request",
+      "type": "n8n-nodes-base.code",
+      "position": [224, 176],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "mode": "list",
+          "value": "calendar@example.com"
+        },
+        "returnAll": true,
+        "options": {
+          "timeMin": "={{ $json.timeMin }}",
+          "timeMax": "={{ $json.timeMax }}"
+        }
+      },
+      "id": "node_3",
+      "name": "Get Calendar Events",
+      "type": "n8n-nodes-base.googleCalendar",
+      "position": [448, 176],
+      "typeVersion": 1,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get config from Client Config node\nconst config = $('Client Config').first().json.config;\n\nconst parseData = $('Parse Slots Request').first().json;\nconst toolCallId = parseData.toolCallId;\nconst requestedDate = parseData.requestedDate;\nconst events = $input.all().map(item => item.json);\n\nconst bookedSlots = new Set();\nfor (const event of events) {\n  if (event.start && (event.start.dateTime || event.start.date)) {\n    const startStr = event.start.dateTime || event.start.date + 'T00:00:00';\n    const endStr = event.end.dateTime || event.end.date + 'T23:59:59';\n    const startTime = new Date(startStr);\n    const endTime = new Date(endStr);\n    \n    let slotTime = new Date(requestedDate + 'T' + String(config.businessHoursStart).padStart(2,'0') + ':00:00-05:00');\n    const endOfDay = new Date(requestedDate + 'T' + String(config.businessHoursEnd).padStart(2,'0') + ':00:00-05:00');\n    \n    while (slotTime < endOfDay) {\n      const slotEnd = new Date(slotTime.getTime() + config.slotDuration * 60000);\n      if (slotTime < endTime && slotEnd > startTime) {\n        const h = String(slotTime.getHours()).padStart(2, '0');\n        const m = String(slotTime.getMinutes()).padStart(2, '0');\n        bookedSlots.add(h + ':' + m);\n      }\n      slotTime = slotEnd;\n    }\n  }\n}\n\nconst availableSlots = [];\nfor (let hour = config.businessHoursStart; hour < config.businessHoursEnd; hour++) {\n  for (let min = 0; min < 60; min += config.slotDuration) {\n    const h = String(hour).padStart(2, '0');\n    const m = String(min).padStart(2, '0');\n    const slot = h + ':' + m;\n    if (!bookedSlots.has(slot)) availableSlots.push(slot);\n  }\n}\n\nlet result = availableSlots.length === 0 \n  ? 'Sorry, no available slots on ' + requestedDate + '. Please try another date.'\n  : 'Available slots on ' + requestedDate + ': ' + availableSlots.join(', ');\n\nreturn { json: { results: [{ toolCallId, result }] } };"
+      },
+      "id": "node_4",
+      "name": "Build Available Slots",
+      "type": "n8n-nodes-base.code",
+      "position": [672, 176],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "node_5",
+      "name": "Respond Slots",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [896, 176],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "client-book",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node_6",
+      "name": "Book Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [-304, 688],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "const webhookData = $input.first().json;\nconst body = webhookData.body || webhookData;\nconst toolCalls = body.message?.toolCalls || [];\nconst argsRaw = toolCalls[0]?.function?.arguments || '{}';\nconst args = typeof argsRaw === 'string' ? JSON.parse(argsRaw) : argsRaw;\nconst toolCallId = toolCalls[0]?.id || '';\nconst phone = args.phone || body.message?.call?.customer?.number || '';\n\nlet datetime = args.datetime || '';\nlet date, time;\n\nif (datetime) {\n  if (datetime.includes('T')) {\n    const parts = datetime.split('T');\n    date = parts[0];\n    time = parts[1].substring(0, 5);\n  } else if (datetime.includes(' ')) {\n    const parts = datetime.split(' ');\n    date = parts[0];\n    time = parts[1].substring(0, 5);\n  } else {\n    date = datetime;\n    time = '10:00';\n  }\n} else {\n  date = args.date || new Date().toISOString().split('T')[0];\n  time = args.time || args.starttime || '10:00';\n}\n\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\nlet bookingDate = new Date(date + 'T00:00:00');\n\nif (bookingDate < today) {\n  const parts = date.split('-').map(Number);\n  const currentYear = today.getFullYear();\n  let newDate = new Date(currentYear, parts[1] - 1, parts[2]);\n  if (newDate < today) newDate = new Date(currentYear + 1, parts[1] - 1, parts[2]);\n  date = newDate.toISOString().split('T')[0];\n}\n\nconst startDateTime = date + 'T' + time + ':00-05:00';\nconst timeParts = time.split(':').map(Number);\nconst endMins = timeParts[1] + 30;\nconst endHours = timeParts[0] + Math.floor(endMins / 60);\nconst endTime = String(endHours).padStart(2,'0') + ':' + String(endMins % 60).padStart(2,'0');\nconst endDateTime = date + 'T' + endTime + ':00-05:00';\n\nreturn {\n  json: {\n    toolCallId,\n    name: args.name || 'Customer',\n    email: args.email || '',\n    phone,\n    notes: args.notes || '',\n    date,\n    time,\n    startDateTime,\n    endDateTime,\n    title: args.title || 'Appointment',\n    timeMin: date + 'T00:00:00-05:00',\n    timeMax: date + 'T23:59:59-05:00'\n  }\n};"
+      },
+      "id": "node_7",
+      "name": "Parse Booking",
+      "type": "n8n-nodes-base.code",
+      "position": [0, 720],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "mode": "list",
+          "value": "calendar@example.com"
+        },
+        "returnAll": true,
+        "options": {
+          "timeMin": "={{ $json.timeMin }}",
+          "timeMax": "={{ $json.timeMax }}"
+        }
+      },
+      "id": "node_8",
+      "name": "Check Conflicts",
+      "type": "n8n-nodes-base.googleCalendar",
+      "position": [224, 720],
+      "typeVersion": 1,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const bookingData = $('Parse Booking').first().json;\nconst events = $input.all().map(item => item.json);\nconst requestedStart = new Date(bookingData.startDateTime);\nconst requestedEnd = new Date(bookingData.endDateTime);\n\nlet hasConflict = false;\nlet conflictingEvent = null;\n\nfor (const event of events) {\n  if (event.start && (event.start.dateTime || event.start.date)) {\n    const startStr = event.start.dateTime || event.start.date + 'T00:00:00';\n    const endStr = event.end.dateTime || event.end.date + 'T23:59:59';\n    const eventStart = new Date(startStr);\n    const eventEnd = new Date(endStr);\n    if (requestedStart < eventEnd && requestedEnd > eventStart) {\n      hasConflict = true;\n      conflictingEvent = event.summary || 'another appointment';\n      break;\n    }\n  }\n}\n\nreturn { json: { ...bookingData, hasConflict, conflictingEvent } };"
+      },
+      "id": "node_9",
+      "name": "Evaluate Conflicts",
+      "type": "n8n-nodes-base.code",
+      "position": [448, 720],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.hasConflict }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "node_10",
+      "name": "Has Conflict?",
+      "type": "n8n-nodes-base.if",
+      "position": [672, 720],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "mode": "list",
+          "value": "calendar@example.com"
+        },
+        "start": "={{ $json.startDateTime }}",
+        "end": "={{ $json.endDateTime }}",
+        "additionalFields": {
+          "conferenceDataUi": {
+            "conferenceDataValues": {
+              "conferenceSolution": "hangoutsMeet"
+            }
+          },
+          "description": "={{ 'Phone: ' + $json.phone + '\\nEmail: ' + $json.email + '\\nNotes: ' + $json.notes }}",
+          "summary": "={{ $json.title + ' - ' + $json.name }}"
+        }
+      },
+      "id": "node_11",
+      "name": "Create Calendar Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "position": [896, 720],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $('Client Config').first().json.config;\nconst bookingData = $('Parse Booking').first().json;\n\nif (!config.ghlEnabled) {\n  return { json: { ...bookingData, ghlContactId: null, ghlContactStatus: 'disabled' } };\n}\n\nconst nameParts = (bookingData.name || 'Customer').trim().split(' ');\nconst firstName = nameParts[0] || 'Customer';\nconst lastName = nameParts.slice(1).join(' ') || '';\n\nlet formattedPhone = bookingData.phone || '';\nif (formattedPhone) {\n  formattedPhone = formattedPhone.replace(/[^0-9+]/g, '');\n  if (!formattedPhone.startsWith('+')) {\n    if (formattedPhone.length === 10) formattedPhone = '+1' + formattedPhone;\n    else if (formattedPhone.length === 11 && formattedPhone.startsWith('1')) formattedPhone = '+' + formattedPhone;\n    else formattedPhone = '+1' + formattedPhone;\n  }\n}\n\nlet existingContactId = null;\nif (bookingData.email) {\n  try {\n    const searchResponse = await this.helpers.request({\n      method: 'GET',\n      url: 'https://services.leadconnectorhq.com/contacts/?locationId=' + config.ghlLocationId + '&email=' + encodeURIComponent(bookingData.email),\n      headers: { 'Authorization': 'Bearer ' + config.ghlApiKey, 'Version': '2021-07-28', 'Accept': 'application/json' },\n      json: true\n    });\n    if (searchResponse.contacts && searchResponse.contacts.length > 0) existingContactId = searchResponse.contacts[0].id;\n  } catch (e) {}\n}\n\nif (existingContactId) {\n  return { json: { ...bookingData, formattedPhone, ghlContactId: existingContactId, ghlContactStatus: 'existing' } };\n}\n\nconst contactPayload = {\n  locationId: config.ghlLocationId,\n  firstName,\n  lastName,\n  email: bookingData.email || '',\n  phone: formattedPhone,\n  source: 'Voice AI',\n  tags: ['Voice AI Booking', 'Appointment']\n};\n\ntry {\n  const response = await this.helpers.request({\n    method: 'POST',\n    url: 'https://services.leadconnectorhq.com/contacts/',\n    headers: { 'Authorization': 'Bearer ' + config.ghlApiKey, 'Content-Type': 'application/json', 'Version': '2021-07-28', 'Accept': 'application/json' },\n    body: contactPayload,\n    json: true\n  });\n  return { json: { ...bookingData, formattedPhone, ghlContactId: response.contact ? response.contact.id : null, ghlContactStatus: 'created' } };\n} catch (error) {\n  const errorMsg = error.message || '';\n  const match = errorMsg.match(/contactId\":\"([a-zA-Z0-9]+)\"/);\n  return { json: { ...bookingData, formattedPhone, ghlContactId: match ? match[1] : null, ghlContactStatus: match ? 'existing-from-error' : 'failed' } };\n}"
+      },
+      "id": "node_12",
+      "name": "Create GHL Contact",
+      "type": "n8n-nodes-base.code",
+      "position": [1120, 720],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $('Client Config').first().json.config;\nconst prevData = $input.first().json;\n\nif (!config.ghlEnabled || !prevData.ghlContactId) {\n  return { json: { ...prevData, ghlOpportunityId: null, ghlOpportunityStatus: 'skipped' } };\n}\n\nconst opportunityPayload = {\n  pipelineId: config.ghlPipelineId,\n  locationId: config.ghlLocationId,\n  name: 'Voice AI Appointment - ' + prevData.name + ' - ' + prevData.date + ' ' + prevData.time,\n  pipelineStageId: config.ghlStageId,\n  status: 'open',\n  contactId: prevData.ghlContactId,\n  monetaryValue: 0,\n  source: 'Voice AI'\n};\n\ntry {\n  const response = await this.helpers.request({\n    method: 'POST',\n    url: 'https://services.leadconnectorhq.com/opportunities/',\n    headers: { 'Authorization': 'Bearer ' + config.ghlApiKey, 'Content-Type': 'application/json', 'Version': '2021-07-28', 'Accept': 'application/json' },\n    body: opportunityPayload,\n    json: true\n  });\n  return { json: { ...prevData, ghlOpportunityId: response.opportunity ? response.opportunity.id : (response.id || null), ghlOpportunityStatus: 'created' } };\n} catch (error) {\n  return { json: { ...prevData, ghlOpportunityId: null, ghlOpportunityStatus: 'failed' } };\n}"
+      },
+      "id": "node_13",
+      "name": "Create GHL Opportunity",
+      "type": "n8n-nodes-base.code",
+      "position": [1344, 720],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $('Client Config').first().json.config;\nconst bookingData = $('Parse Booking').first().json;\nconst calendarData = $('Create Calendar Event').first().json;\nconst contactData = $('Create GHL Contact').first().json;\nconst meetLink = calendarData.hangoutLink || 'Check your email';\nconst contactId = contactData.ghlContactId;\n\nif (!config.smsEnabled || !contactId) {\n  return { json: { ...bookingData, meetLink, smsClientStatus: 'skipped' } };\n}\n\nlet clientPhone = bookingData.phone;\nif (clientPhone) {\n  clientPhone = clientPhone.replace(/[^0-9+]/g, '');\n  if (!clientPhone.startsWith('+')) clientPhone = clientPhone.length === 10 ? '+1' + clientPhone : '+' + clientPhone;\n}\n\nif (!clientPhone) {\n  return { json: { ...bookingData, meetLink, smsClientStatus: 'no-phone' } };\n}\n\nconst message = 'Hi ' + bookingData.name + '! Your appointment is confirmed:\\n\\n' + bookingData.date + ' at ' + bookingData.time + '\\n\\nJoin here:\\n' + meetLink + '\\n\\n' + config.smsSignature;\n\ntry {\n  await this.helpers.request({\n    method: 'POST',\n    url: 'https://services.leadconnectorhq.com/conversations/messages',\n    headers: { 'Authorization': 'Bearer ' + config.ghlApiKey, 'Content-Type': 'application/json', 'Version': '2021-04-15' },\n    body: { type: 'SMS', contactId, message },\n    json: true\n  });\n  return { json: { ...bookingData, meetLink, contactId, smsClientStatus: 'sent' } };\n} catch (error) {\n  return { json: { ...bookingData, meetLink, contactId, smsClientStatus: 'failed' } };\n}"
+      },
+      "id": "node_14",
+      "name": "SMS to Client",
+      "type": "n8n-nodes-base.code",
+      "position": [1568, 720],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $('Client Config').first().json.config;\nconst bookingData = $('Parse Booking').first().json;\nconst calendarData = $('Create Calendar Event').first().json;\nconst prevData = $input.first().json;\nconst meetLink = calendarData.hangoutLink || prevData.meetLink || 'Check calendar';\nconst contactId = prevData.contactId || 'N/A';\n\nconst ghlLink = config.ghlEnabled && contactId !== 'N/A' \n  ? 'https://app.gohighlevel.com/v2/location/' + config.ghlLocationId + '/contacts/detail/' + contactId\n  : 'GHL not enabled';\n\nreturn {\n  json: {\n    ...prevData,\n    clientEmail: bookingData.email,\n    clientName: bookingData.name,\n    meetLink,\n    clientSubject: 'Your Appointment Confirmation - ' + bookingData.date + ' at ' + bookingData.time,\n    clientBody: 'Hi ' + bookingData.name + '!\\n\\nYour appointment has been confirmed!\\n\\nDate: ' + bookingData.date + '\\nTime: ' + bookingData.time + '\\n\\nJoin via Google Meet:\\n' + meetLink + '\\n\\nIf you need to reschedule, please reply to this email or call us.\\n\\nThank you!\\n\\n' + config.emailSignature,\n    ownerSubject: 'NEW BOOKING: ' + bookingData.name + ' - ' + bookingData.date + ' ' + bookingData.time,\n    ownerBody: 'NEW APPOINTMENT BOOKED!\\n\\nName: ' + bookingData.name + '\\nPhone: ' + bookingData.phone + '\\nEmail: ' + bookingData.email + '\\nDate: ' + bookingData.date + '\\nTime: ' + bookingData.time + '\\nNotes: ' + (bookingData.notes || 'None') + '\\n\\nGoogle Meet:\\n' + meetLink + '\\n\\nCRM: ' + ghlLink,\n    ownerEmail: config.ownerEmail\n  }\n};"
+      },
+      "id": "node_15",
+      "name": "Prepare Emails",
+      "type": "n8n-nodes-base.code",
+      "position": [1792, 720],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Client Config').first().json.config.fromEmail }}",
+        "toEmail": "={{ $json.clientEmail }}",
+        "subject": "={{ $json.clientSubject }}",
+        "text": "={{ $json.clientBody }}",
+        "options": {}
+      },
+      "id": "node_18",
+      "name": "Send Client Email",
+      "type": "n8n-nodes-base.emailSend",
+      "position": [2016, 620],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Client Config').first().json.config.fromEmail }}",
+        "toEmail": "={{ $json.ownerEmail }}",
+        "subject": "={{ $json.ownerSubject }}",
+        "text": "={{ $json.ownerBody }}",
+        "options": {}
+      },
+      "id": "node_16",
+      "name": "Send Owner Email",
+      "type": "n8n-nodes-base.emailSend",
+      "position": [2016, 820],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ results: [{ toolCallId: $('Parse Booking').first().json.toolCallId, result: 'Appointment booked for ' + $('Parse Booking').first().json.name + ' on ' + $('Parse Booking').first().json.date + ' at ' + $('Parse Booking').first().json.time + '. Your Google Meet link is ' + $('Create Calendar Event').first().json.hangoutLink + '. Confirmation email sent to ' + $('Parse Booking').first().json.email }] }) }}",
+        "options": {}
+      },
+      "id": "node_17",
+      "name": "Respond Booked",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [2240, 720],
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Get Slots Webhook": {
+      "main": [[{"node": "Parse Slots Request", "type": "main", "index": 0}]]
+    },
+    "Parse Slots Request": {
+      "main": [[{"node": "Get Calendar Events", "type": "main", "index": 0}]]
+    },
+    "Get Calendar Events": {
+      "main": [[{"node": "Build Available Slots", "type": "main", "index": 0}]]
+    },
+    "Build Available Slots": {
+      "main": [[{"node": "Respond Slots", "type": "main", "index": 0}]]
+    },
+    "Book Webhook": {
+      "main": [[{"node": "Parse Booking", "type": "main", "index": 0}]]
+    },
+    "Parse Booking": {
+      "main": [[{"node": "Check Conflicts", "type": "main", "index": 0}]]
+    },
+    "Check Conflicts": {
+      "main": [[{"node": "Evaluate Conflicts", "type": "main", "index": 0}]]
+    },
+    "Evaluate Conflicts": {
+      "main": [[{"node": "Has Conflict?", "type": "main", "index": 0}]]
+    },
+    "Has Conflict?": {
+      "main": [
+        [],
+        [{"node": "Create Calendar Event", "type": "main", "index": 0}]
+      ]
+    },
+    "Create Calendar Event": {
+      "main": [[{"node": "Create GHL Contact", "type": "main", "index": 0}]]
+    },
+    "Create GHL Contact": {
+      "main": [[{"node": "Create GHL Opportunity", "type": "main", "index": 0}]]
+    },
+    "Create GHL Opportunity": {
+      "main": [[{"node": "SMS to Client", "type": "main", "index": 0}]]
+    },
+    "SMS to Client": {
+      "main": [[{"node": "Prepare Emails", "type": "main", "index": 0}]]
+    },
+    "Prepare Emails": {
+      "main": [[
+        {"node": "Send Client Email", "type": "main", "index": 0},
+        {"node": "Send Owner Email", "type": "main", "index": 0}
+      ]]
+    },
+    "Send Client Email": {
+      "main": [[{"node": "Respond Booked", "type": "main", "index": 0}]]
+    },
+    "Send Owner Email": {
+      "main": [[{"node": "Respond Booked", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
