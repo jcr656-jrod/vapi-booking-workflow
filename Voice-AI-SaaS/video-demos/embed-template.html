@@ -1,0 +1,124 @@
+<!-- 
+  VIDEO DEMO EMBED TEMPLATE
+  Replace VIDEO_ID with your YouTube/Loom ID
+-->
+
+<!-- OPTION 1: YouTube Embed -->
+<div class="demo-video-container" style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 12px; margin: 20px 0;">
+  <iframe 
+    src="https://www.youtube.com/embed/VIDEO_ID?rel=0&modestbranding=1" 
+    style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none;"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+    allowfullscreen>
+  </iframe>
+</div>
+
+<!-- OPTION 2: Loom Embed -->
+<div class="demo-video-container" style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 12px; margin: 20px 0;">
+  <iframe 
+    src="https://www.loom.com/embed/VIDEO_ID?hide_owner=true&hide_share=true&hide_title=true&hideEmbedTopBar=true" 
+    style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none;"
+    allowfullscreen>
+  </iframe>
+</div>
+
+<!-- OPTION 3: Custom Video Player with Thumbnail -->
+<div class="demo-video-card" style="background: #1a1a2e; border-radius: 12px; overflow: hidden; margin: 20px 0;">
+  
+  <!-- Video -->
+  <div class="video-wrapper" style="position: relative; padding-bottom: 56.25%; height: 0;">
+    <iframe 
+      src="https://www.youtube.com/embed/VIDEO_ID?rel=0" 
+      style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none;"
+      allowfullscreen>
+    </iframe>
+  </div>
+  
+  <!-- Caption -->
+  <div class="video-caption" style="padding: 16px; color: white;">
+    <h3 style="margin: 0 0 8px 0; font-size: 18px;">Watch the Demo</h3>
+    <p style="margin: 0; color: #888; font-size: 14px;">See how our AI receptionist handles a real booking call</p>
+  </div>
+  
+  <!-- CTA Button -->
+  <div style="padding: 0 16px 16px;">
+    <a href="#contact" style="display: block; background: linear-gradient(135deg, #00b894, #00cec9); color: white; text-align: center; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold;">
+      Get This For Your Business →
+    </a>
+  </div>
+  
+</div>
+
+
+<!-- FULL PAGE COMPONENT: Video Demo Section -->
+<style>
+.video-demo-section {
+  background: linear-gradient(180deg, #0a0a1a 0%, #1a1a2e 100%);
+  padding: 60px 20px;
+  text-align: center;
+}
+
+.video-demo-section h2 {
+  color: white;
+  font-size: 32px;
+  margin-bottom: 12px;
+}
+
+.video-demo-section .subtitle {
+  color: #888;
+  font-size: 18px;
+  margin-bottom: 40px;
+}
+
+.video-container {
+  max-width: 800px;
+  margin: 0 auto;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 206, 201, 0.2);
+}
+
+.video-container iframe {
+  width: 100%;
+  aspect-ratio: 16/9;
+  border: none;
+}
+
+.video-cta {
+  margin-top: 30px;
+}
+
+.video-cta a {
+  display: inline-block;
+  background: linear-gradient(135deg, #00b894, #00cec9);
+  color: white;
+  padding: 16px 32px;
+  border-radius: 30px;
+  text-decoration: none;
+  font-weight: bold;
+  font-size: 18px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.video-cta a:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(0, 206, 201, 0.3);
+}
+</style>
+
+<section class="video-demo-section">
+  <h2>🎧 Hear It In Action</h2>
+  <p class="subtitle">Watch a real demo call with our AI receptionist</p>
+  
+  <div class="video-container">
+    <iframe 
+      src="https://www.youtube.com/embed/VIDEO_ID?rel=0&modestbranding=1"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+      allowfullscreen>
+    </iframe>
+  </div>
+  
+  <div class="video-cta">
+    <a href="#get-started">Get Your AI Receptionist →</a>
+  </div>
+</section>
