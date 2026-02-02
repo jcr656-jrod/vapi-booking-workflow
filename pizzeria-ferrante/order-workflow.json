@@ -1,0 +1,115 @@
+{
+  "name": "Pizzeria Ferrante - Order System",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ferrante-order",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook_order",
+      "name": "Order Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [0, 300],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse incoming VAPI order request\nconst webhookData = $input.first().json;\nconst body = webhookData.body || webhookData;\nconst toolCalls = body.message?.toolCalls || [];\nconst toolCallId = toolCalls[0]?.id || '';\nconst argsRaw = toolCalls[0]?.function?.arguments || '{}';\nconst args = typeof argsRaw === 'string' ? JSON.parse(argsRaw) : argsRaw;\n\n// Extract order details\nconst order = {\n  toolCallId,\n  customerName: args.customer_name || 'Customer',\n  customerPhone: args.customer_phone || body.message?.call?.customer?.number || '',\n  orderType: args.order_type || 'pickup',\n  deliveryAddress: args.delivery_address || '',\n  items: args.items || '',\n  total: args.total || 0,\n  specialInstructions: args.special_instructions || '',\n  orderTime: new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }),\n  orderId: 'PF-' + Date.now().toString(36).toUpperCase()\n};\n\n// Format phone number\nlet phone = order.customerPhone.replace(/[^0-9+]/g, '');\nif (phone && !phone.startsWith('+')) {\n  phone = phone.length === 10 ? '+1' + phone : '+' + phone;\n}\norder.formattedPhone = phone;\n\n// Calculate estimated time\norder.estimatedTime = order.orderType === 'pickup' ? '20-25 minutes' : '35-45 minutes';\n\nreturn { json: order };"
+      },
+      "id": "parse_order",
+      "name": "Parse Order",
+      "type": "n8n-nodes-base.code",
+      "position": [220, 300],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "const order = $input.first().json;\n\n// Build formatted order for email/kitchen\nconst orderDetails = `\n═══════════════════════════════════════════\n       PIZZERIA FERRANTE - NEW ORDER\n═══════════════════════════════════════════\n\nORDER #: ${order.orderId}\nTIME: ${order.orderTime}\n\n───────────────────────────────────────────\nCUSTOMER INFO\n───────────────────────────────────────────\nName: ${order.customerName}\nPhone: ${order.customerPhone}\nOrder Type: ${order.orderType.toUpperCase()}\n${order.orderType === 'delivery' ? `Delivery Address: ${order.deliveryAddress}` : ''}\n\n───────────────────────────────────────────\nORDER ITEMS\n───────────────────────────────────────────\n${order.items}\n\n───────────────────────────────────────────\nORDER TOTAL: $${order.total.toFixed(2)}\n───────────────────────────────────────────\n${order.specialInstructions ? `\\nSPECIAL INSTRUCTIONS:\\n${order.specialInstructions}\\n` : ''}\nESTIMATED TIME: ${order.estimatedTime}\n\n═══════════════════════════════════════════\n`;\n\n// Customer confirmation message (for SMS)\nconst customerMessage = `Hi ${order.customerName}! Your order #${order.orderId} is confirmed.\\n\\nTotal: $${order.total.toFixed(2)}\\n${order.orderType === 'pickup' ? 'Ready for pickup' : 'Delivery'} in ${order.estimatedTime}.\\n\\nPizzeria Ferrante\\n407-556-3305`;\n\nreturn {\n  json: {\n    ...order,\n    orderDetails,\n    customerMessage,\n    emailSubject: `🍕 NEW ORDER #${order.orderId} - ${order.customerName} (${order.orderType.toUpperCase()})`,\n    emailBody: orderDetails\n  }\n};"
+      },
+      "id": "format_order",
+      "name": "Format Order",
+      "type": "n8n-nodes-base.code",
+      "position": [440, 300],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "fromEmail": "orders@pizzeriaferrante.com",
+        "toEmail": "kitchen@pizzeriaferrante.com",
+        "subject": "={{ $json.emailSubject }}",
+        "text": "={{ $json.emailBody }}",
+        "options": {}
+      },
+      "id": "send_kitchen_email",
+      "name": "Email to Kitchen",
+      "type": "n8n-nodes-base.emailSend",
+      "position": [660, 200],
+      "typeVersion": 1,
+      "credentials": {
+        "smtp": {
+          "id": "YOUR_SMTP_CREDENTIAL_ID",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "orders@pizzeriaferrante.com",
+        "toEmail": "owner@pizzeriaferrante.com",
+        "subject": "={{ $json.emailSubject }}",
+        "text": "={{ $json.emailBody }}",
+        "options": {}
+      },
+      "id": "send_owner_email",
+      "name": "Email to Owner",
+      "type": "n8n-nodes-base.emailSend",
+      "position": [660, 400],
+      "typeVersion": 1,
+      "credentials": {
+        "smtp": {
+          "id": "YOUR_SMTP_CREDENTIAL_ID",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ results: [{ toolCallId: $('Parse Order').first().json.toolCallId, result: 'Order ' + $('Parse Order').first().json.orderId + ' has been submitted! ' + ($('Parse Order').first().json.orderType === 'pickup' ? 'Your order will be ready for pickup' : 'Your order will be delivered') + ' in approximately ' + $('Parse Order').first().json.estimatedTime + '. Thank you for choosing Pizzeria Ferrante!' }] }) }}",
+        "options": {}
+      },
+      "id": "respond_success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [880, 300],
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Order Webhook": {
+      "main": [[{ "node": "Parse Order", "type": "main", "index": 0 }]]
+    },
+    "Parse Order": {
+      "main": [[{ "node": "Format Order", "type": "main", "index": 0 }]]
+    },
+    "Format Order": {
+      "main": [
+        [
+          { "node": "Email to Kitchen", "type": "main", "index": 0 },
+          { "node": "Email to Owner", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Email to Kitchen": {
+      "main": [[{ "node": "Respond Success", "type": "main", "index": 0 }]]
+    },
+    "Email to Owner": {
+      "main": [[{ "node": "Respond Success", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
